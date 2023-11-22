@@ -69,7 +69,8 @@ class MotionFeature(object):
 
 
 class PowerFeature(object):
-    def __init__(self, data, voltage_field_name=None,
+    def __init__(self, data,
+                 voltage_field_name=None,
                  current_field_name=None,
                  time_field_name=None,
                  rated_power=None,
@@ -194,6 +195,168 @@ class PowerFeature(object):
             '常用功率点': common_power_points,
             '稳态电流': steady_state_currents
         }
+
+
+class PilePerform:
+    def __init__(self,
+                 data,
+                 volume=None,
+                 weight=None,
+                 peak_power=None,
+                 rated_power=None,
+                 max_speed=None,
+                 speed_field_name=None,
+                 time_field_name=None,
+                 voltage_field_name=None,
+                 current_field_name=None,
+                 consecutive_frame=None,
+                 hyd_field_name=None):
+        """
+        计算指标：
+        *质量功率密度（kW/kg）：单位质量能够输出的额定功率,单位为kg/L
+        *体积功率密度（kW/L）：单位体积能够输出的额定功率,单位为kW/L
+        *过载功率及过载功率持续时间：最高车速下的后备功率输出能力，单位:kW
+        *功率分布：（不同功率区间例如0-20kw,20-40kw,40-60kw,60kw+的频率分布）
+        ?额定净输出功率：规定的额定工况下能够持续工作的净输出功率,即燃料电池堆输出功率减去辅助系统消耗功率后所剩的功率,单位为千瓦(kW)
+        ?额定功率下的发动机效率：额定功率输出时,净输出功率与进入燃料电池堆的燃料热值(低热值)之比
+        额定功率氢消耗率：额定功率输出状态下单位时间的氢消耗量,单位为g/s
+        怠速氢消耗率：在怠速状态下单位时间的氢消耗量,单位为g/s
+        氢气消耗率：每百公里，氢气消耗的量，单位：kg/100km
+        启动时间：在室温下(25℃)从开始启动到进入怠速的响应时间,单位为s
+        零下冷启动时间：低于0℃温度下从开始启动到进入怠速的响应时间,单位为s
+        平均功率加载速率：变加载的速率,单位为kW/s。
+        0%-100%额定功率响应时间：从怠速状态(0%额定功率)到额定输出(100%额定功率)的响应时间,单位为s
+        电压范围：全工况下的电压范围,单位为Ⅴ
+        额定功率下电压波动带宽：额定功率输出时电压波动的带宽(幅度),单位为Ⅴ
+        过载工况下电压下降百分比：在过载工况下相对于额定工况电压下降的百分数
+        电堆衰退率：燃料电池发动机实际运行中输出性能的缓慢变化，单位为μV/h
+        电堆剩余寿命：构建寿命预测经验库，预测电堆剩余使用寿命，单位h
+        稳态电压：稳定工况下的电压值，单位：V
+        单体电压不一致性：稳定工况下的单体电压值的不一致性系数
+        电堆内阻：包括活化、欧姆、浓差电阻
+
+            :param data: 按时间顺序排序, pandas frame格式
+            :param volume: 电堆体积(L)
+            :param weight: 电堆质量（kg）
+            :param peak_power:电堆峰值功率（kW）
+            :param rated_power:电堆额定功率（kW）
+            :param max_speed: 额定最高速度（km*h）
+            :param speed_field_name: 数据中速度字段名称
+            :param time_field_name: 数据中时间字段名称
+            :param voltage_field_name: 数据中电堆电压字段名称
+            :param current_field_name: 数据中电堆电流字段名称
+            :param consecutive_frame: 两帧时间间隔
+            :param hyd_field_name: 数据中当前剩余氢气质量字段名称
+
+
+        """
+        self.data = data
+        self.volume = volume
+        self.weight = weight
+        self.peak_power = peak_power
+        self.rated_power = rated_power
+        self.max_speed = max_speed
+        self.speed_field_name = speed_field_name
+        self.time_field_name = time_field_name
+        self.voltage_field_name = voltage_field_name
+        self.current_field_name = current_field_name
+        self.consecutive_frame = consecutive_frame
+        self.hyd_field_name = hyd_field_name
+
+    def extract_overload_power_fea(self):
+        if not self.max_speed or not self.speed_field_name:
+            raise NameError("该方法需要定义max_speed参数和speed_field_name参数")
+
+        if not self.voltage_field_name or not self.current_field_name:
+            raise NameError("该方法需要定义volume_field_name参数和current_field_name参数")
+
+        if not self.consecutive_frame:
+            raise NameError("该方法需要定义consecutive_frame参数")
+
+        # 找出self.data里面速度大于预定最大速度的数据帧，并判断其是否连续，提取对应的功率值平均值作为过载功率，以及最大的连续时间（单位：s）
+        self.data['power'] = self.data[self.voltage_field_name] * self.data[self.current_field_name] / 1000
+
+        # Find rows with speeds greater than the maximum speed
+        exceed_speed_rows = self.data[self.data[self.speed_field_name] > self.max_speed]
+
+        # Check continuity of exceed speed rows
+        time_diff = exceed_speed_rows[self.time_field_name].diff()  # Calculate time differences between rows
+        is_continuous = time_diff <= pd.Timedelta(seconds=self.consecutive_frame)  # Check if time differences are within
+        continuous_rows = exceed_speed_rows[is_continuous]  # Filter rows with continuity
+        continuous_diff = time_diff[is_continuous]
+
+        # Calculate average power as overload power
+        overload_power = np.mean(continuous_rows['power'])
+
+        # Calculate maximum consecutive time
+        max_consecutive_time = pd.Timedelta(0)
+        current_consecutive_time = pd.Timedelta(0)
+        for i in range(1, len(continuous_rows)):
+            if continuous_diff.iloc[i] <= pd.Timedelta(seconds=self.consecutive_frame):
+                current_consecutive_time += continuous_diff.iloc[i]
+            else:
+                if current_consecutive_time > max_consecutive_time:
+                    max_consecutive_time = current_consecutive_time
+                current_consecutive_time = pd.Timedelta(0)
+
+        # Check if the last consecutive time is the maximum
+        if current_consecutive_time > max_consecutive_time:
+            max_consecutive_time = current_consecutive_time
+
+        # Convert max_consecutive_time to seconds
+        max_consecutive_time = max_consecutive_time.total_seconds()
+
+        # Return the calculated overload power and maximum consecutive time
+        return overload_power, max_consecutive_time
+
+    def extract_power_distribution(self):
+        if not self.voltage_field_name or not self.current_field_name:
+            raise NameError("该方法需要定义volume_field_name参数和current_field_name参数")
+        # （不同功率区间例如0-20kw,20-40kw,40-60kw,60-80kw,80-100kw, 100-120kw, 120-140kw, 140kw+的频率分布）
+        # 计算功率分布区间
+        power_intervals = [0, 20, 40, 60, 80, 100, 120, 140, 10000]
+        key = ['0-20', '20-40', '40-60', '60-80', '80-100', '100-120', '120-140', '140+']
+
+        # 在self.data中计算功率
+        self.data['power'] = self.data[self.voltage_field_name] * self.data[self.current_field_name] / 1000
+
+        # 计算不同功率区间的频率
+        power_freq = pd.cut(self.data['power'], power_intervals).value_counts(sort=False)
+
+        # 计算总样本数
+        total_samples = len(self.data)
+
+        # 计算频率分布（分别除以电池数量、单位体积、单位质量）
+        power_dist = dict(zip(key, (power_freq / total_samples).values))
+
+        # 返回功率分布的频率分布
+        return power_dist
+
+    def extract_hyd_consume(self):
+        #  额定工况氢消耗率：额定功率输出状态下单位时间的氢消耗量,单位为g/s,将功率=额定功率±5kw认为是额定工况
+        #  怠速氢消耗率：在怠速状态下单位时间的氢消耗量,单位为g/s
+        #  氢气消耗率：每百公里，氢气消耗的量，单位：kg/100km
+
+
+    def extract(self):
+        if self.rated_power and self.volume:
+            volume_power_density = self.rated_power / self.volume
+        else:
+            volume_power_density = np.nan
+
+        if self.rated_power and self.weight:
+            weight_power_density = self.rated_power / self.weight
+        else:
+            weight_power_density = np.nan
+
+
+
+
+
+
+
+
+
 
 
 
