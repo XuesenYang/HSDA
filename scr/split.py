@@ -79,18 +79,18 @@ class Spliter:
         for index, row in self.data.iterrows():
             current_time = row[self.time_field_name]
 
-            if start_time is None:  # First frame
+            if start_time is None:  # 首帧
                 start_time = current_time
                 prev_time = current_time
             else:
                 time_diff = (current_time - prev_time).total_seconds()
 
-                if time_diff > self.normal_interval:  # Break the segment
-                    yield self.data.loc[start_index:index-1]  # Return the previous segment
+                if time_diff > self.normal_interval:
+                    yield self.data.loc[start_index:index-1]
 
                     start_time = current_time
                     start_index = index
 
                 prev_time = current_time
 
-        yield self.data.loc[start_index:]  # Return the last segment
+        yield self.data.loc[start_index:]

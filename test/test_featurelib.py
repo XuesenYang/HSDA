@@ -96,10 +96,57 @@ def test_extract_pile_perform_features():
                                current_field_name='current')
 
     # 测试功率分布的频率分布提取
-    power_dist = pile_perform.extract_power_distribution()
+    power_dist, volume_power_density, weight_power_density = pile_perform.extract_power_distribution()
 
     # 打印结果
     print("功率分布:", power_dist)
+    print("质量功率密度:", weight_power_density)
+    print("体积功率密度:", volume_power_density)
+
+    # Create a sample DataFrame for testing
+    data = pd.DataFrame({
+        'time': pd.to_datetime(['2023-11-23 09:00:01', '2023-11-23 09:00:02', '2023-11-23 09:00:03',
+                                '2023-11-23 09:00:04', '2023-11-23 09:00:05', '2023-11-23 09:00:06']),
+        'voltage': [200, 210, 220, 200, 210, 220],
+        'current': [50, 50, 70, 1, 1, 70],
+        'hyd_mass': [100, 99.98, 99.96, 99.93, 99.93, 99.92],
+        'speed': [100, 100, 100, 0, 0, 100],
+        'mileage':[100.1, 100.2, 100.3, 100.3, 100.3, 100.4],
+    })
+
+    # Create an instance of PilePerform and specify the necessary parameters
+    pile = PilePerform(
+        data=data,
+        rated_power=10,
+        time_field_name='time',
+        voltage_field_name='voltage',
+        current_field_name='current',
+        hyd_field_name='hyd_mass',
+        speed_field_name='speed',
+        mileage_field_name='mileage',
+        consecutive_frame=5
+    )
+
+    # Call the extract_hyd_consume method and print the results
+    rated_power_consume_rate, idle_power_consume_rate, hyd_consume_100km = pile.extract_hyd_consume()
+
+    print("额定工况氢消耗率:", rated_power_consume_rate)
+    print("怠速氢消耗率:", idle_power_consume_rate)
+    print("百公里氢气消耗率:", hyd_consume_100km)
+
+
+    data = {
+    'power': [100, 150, 120, 80, 90, 110],
+    'voltage': [230, 235, 228, 240, 232, 230]
+    }
+
+    pile = PilePerform(data, rated_power=100, voltage_field_name='voltage')
+
+    voltage_range, voltage_bandwidth, overload_voltage_drop_pct = pile.extract_voltage()
+
+    print(f"Voltage Range: {voltage_range}")
+    print(f"Voltage Bandwidth at Rated Power: {voltage_bandwidth}")
+    print(f"Percentage Voltage Drop under Overload Conditions: {overload_voltage_drop_pct}")
 
 
 if __name__ == '__main__':
